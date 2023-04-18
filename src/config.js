@@ -4,8 +4,10 @@ config();
 
 export default {
     secret: process.env.secret || "",
-    host: process.env.HOST || "",
-    database: process.env.DATABASE || "",
-    user: process.env.USER || "",
-    password: process.env.PASSWORD || ""
+    host: process.env.host || "",
+    port: process.env.port || "",
+    user: process.env.user || "",
+    password: process.env.password || "",
+    database: process.env.database || "",
+
 };
