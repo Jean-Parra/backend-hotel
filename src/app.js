@@ -2,6 +2,7 @@ import express from "express";
 import morgan from "morgan";
 // Routes
 import userRoutes from "./routes/user.routes";
+import roomRoutes from "./routes/room.route";
 const cors = require('cors');
 
 const app = express();
@@ -10,6 +11,8 @@ app.set("port", 80);
 
 app.use(morgan("dev"));
 app.use(express.json());
+app.use(express.static('public'));
+app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 const corsOptions = {
     origin: 'http://127.0.0.1:5500',
@@ -25,5 +28,6 @@ app.use((req, res, next) => {
 });
 
 app.use("/api/usuarios", userRoutes);
+app.use("/api/habitaciones", roomRoutes);
 
 export default app;

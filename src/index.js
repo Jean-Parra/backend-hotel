@@ -1,4 +1,5 @@
 import app from "./app";
+require('./connection');
 
 const main = () => {
     app.listen(app.get("port"));

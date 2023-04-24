@@ -1,26 +1,36 @@
-import config from "../config";
-import { getConnection } from "../database/database";
-import User from "../models/user.model";
+const User = require('../models/user.model');
+const verifyToken = require('./verifyToken').default;
 const jwt = require('jsonwebtoken');
+const config = require('../config');
+
+const obtenerPermiso = async(req, res) => {
+    try {
+        const user = await User.findById(req.params.userID);
+        if (!user) {
+            return res.status(401).json({ message: 'El ID no esta registrado' });
+        }
+        res.status(200).json(user);
+    } catch (err) {
+        console.error('Error en el endpoint de obtener permiso:', err);
+        return res.status(500).json({ message: 'Error interno del servidor' });
+    }
+
+};
 
 const login = async(req, res) => {
     try {
-        const connection = await getConnection();
-
-        const { correo, contraseña } = req.body;
-        const query = 'SELECT * FROM usuarios WHERE correo = ?';
-        const result = await connection.query(query, [correo]);
-        const user = result[0];
-
+        const user = await User.findOne({ correo: req.body.correo })
         if (!user) {
             return res.status(401).json({ message: 'El correo no está registrado' });
         }
+        console.log(req.body.contraseña);
+        console.log(user.contraseña);
 
-        const isValidPassword = await User.validatePassword(contraseña, user.CONTRASEÑA);
+        const isValidPassword = await user.validatePassword(req.body.contraseña, user.contraseña);
         if (!isValidPassword) {
             return res.status(401).json({ message: 'Contraseña incorrecta' });
         }
-        const token = jwt.sign({ userId: user.ID }, config.secret, {
+        const token = jwt.sign({ userId: user._id }, config.default.secret, {
             expiresIn: '7d'
         });
         return res.status(200).json({ message: 'Inicio de sesión exitoso', token: token });
@@ -32,30 +42,25 @@ const login = async(req, res) => {
 
 const register = async(req, res) => {
     try {
-        const connection = await getConnection();
-        await User.createTableIfNotExists();
         const { nombres, apellidos, correo, cedula, edad, genero, contraseña } = req.body;
-        const checkQuery1 = 'SELECT * FROM usuarios WHERE cedula = ?';
-        const checkResult1 = await connection.query(checkQuery1, [cedula]);
-        const existingUser = checkResult1[0];
+        const existingUser = await User.findOne({ cedula });
         if (existingUser) {
-            return res.status(400).json({ message: 'El usuario ya está registrado' });
+            return res.status(400).json({ message: 'La cedula ya esta registrada' });
         }
-        const checkQuery2 = 'SELECT * FROM usuarios WHERE correo = ?';
-        const checkResult2 = await connection.query(checkQuery2, [correo]);
-        const existingEmail = checkResult2[0];
+        const existingEmail = await User.findOne({ correo });
         if (existingEmail) {
             return res.status(400).json({ message: 'El correo ya está registrado' });
         }
-        const encryptedPassword = await User.encryptPassword(contraseña);
-        const insertQuery = 'INSERT INTO usuarios (id_permiso,nombres, apellidos, correo, cedula, edad, genero, contraseña) VALUES ("1",?, ?, ?, ?, ?, ?, ?)';
-
-        await connection.query(insertQuery, [nombres, apellidos, correo, cedula, edad, genero, encryptedPassword]);
-        const token = jwt.sign({ userId: user.ID }, config.secret, {
+        const permiso = 'usuarios';
+        const user = new User({ nombres, apellidos, correo, cedula, edad, genero, contraseña, permiso });
+        user.contraseña = await user.encryptPassword(contraseña);
+        await user.save();
+        const token = jwt.sign({ userId: user._id }, config.default.secret, {
             expiresIn: '7d'
         });
         return res.status(200).json({ message: 'Usuario registrado exitosamente', token: token });
     } catch (err) {
+        console.error(err);
         console.error('Error en el endpoint de registro:', err);
         return res.status(500).json({ message: 'Error interno del servidor' });
     }
@@ -64,10 +69,14 @@ const register = async(req, res) => {
 
 const verificar = async(req, res, next) => {
     try {
-        await User.verifyToken(req, res, next);
+        await verifyToken(req, res, next);
         return res.status(200).json({ message: 'Token seguro', id: req.userId });
     } catch (err) {
+        if (res.headersSent) {
+            return next(err);
+        }
         if (err.message === 'Token inválido') {
+            console.log('Token inválido');
             return res.status(401).json({ message: 'Token inválido' });
         } else {
             return res.status(500).json({ message: 'Error interno del servidor' });
@@ -75,38 +84,44 @@ const verificar = async(req, res, next) => {
     }
 };
 
-// Endpoint para obtener usuarios registrados
+
 const usuariosRegistrados = async(req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 10;
         const offset = (page - 1) * limit;
-        const connection = await getConnection();
         const { q: textoBusqueda } = req.query;
-        let query = `SELECT * FROM usuarios`;
-        const queryParams = [];
+        let query = {};
         if (textoBusqueda && textoBusqueda !== '') {
-            query += ` WHERE NOMBRES LIKE ? OR APELLIDOS LIKE ? OR CORREO LIKE ? OR CEDULA LIKE ?`;
-            const searchParam = `%${textoBusqueda}%`;
-            queryParams.push(searchParam, searchParam, searchParam, searchParam);
+            query = {
+                $or: [
+                    { nombres: { $regex: textoBusqueda, $options: 'i' } },
+                    { apellidos: { $regex: textoBusqueda, $options: 'i' } },
+                    { correo: { $regex: textoBusqueda, $options: 'i' } },
+                    { genero: { $regex: textoBusqueda, $options: 'i' } },
+                    { cedula: { $regex: textoBusqueda, $options: 'i' } },
+                    { edad: { $regex: textoBusqueda, $options: 'i' } },
+                ]
+            };
         }
-        query += ` LIMIT ${limit} OFFSET ${offset}`;
-        console.log(query);
-        const result = await connection.query(query, queryParams);
-        if (!result || result.length === 0) {
+        const totalUsuarios = await User.countDocuments(query);
+        const usuarios = await User.find(query)
+            .skip(offset)
+            .limit(limit);
+        if (!usuarios || usuarios.length === 0) {
             return res.status(401).json({ message: 'No se encontraron usuarios registrados' });
         }
-        const totalUsuariosQuery = `SELECT COUNT(*) as total FROM usuarios`;
-        const totalUsuariosResult = await connection.query(totalUsuariosQuery);
-        const totalUsuarios = totalUsuariosResult[0].total;
-        return res.status(200).json({ message: 'Lista de usuarios obtenidos', usuarios: result, cantidad: totalUsuarios });
-    } catch (err) {
-        console.error('Error en el endpoint de obtener usuarios:', err);
+        return res.status(200).json({ message: 'Lista de usuarios obtenidos', usuarios, cantidad: totalUsuarios });
+    } catch (error) {
+        console.error('Error en el endpoint de obtener usuarios:', error);
         return res.status(500).json({ message: 'Error interno del servidor' });
     }
 };
 
+
+
 export const methods = {
+    obtenerPermiso,
     login,
     register,
     verificar,
