@@ -14,7 +14,7 @@ RUN npm install
 COPY . .
 
 # Expone el puerto 8080 para el backend
-EXPOSE 8080
+EXPOSE 80
 
 # Ejecuta el comando para iniciar el backend
 CMD ["npm", "run", "dev"]
